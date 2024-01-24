@@ -1,0 +1,4 @@
+S_DIM = 26
+H_DIM = 26
+A_NUM = 20
+A_DIM = 1
