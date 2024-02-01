@@ -143,9 +143,10 @@ class PPO():
         return action, hc
     
     def get_v(self, hc, obs, img, la):
-        inputs = torch.concatenate([hc, obs, img, la], axis= 1)
-        value = self.value_net(inputs)
-        return value
+        with torch.no_grad():
+            inputs = torch.concatenate([hc, obs, img, la], axis= 1)
+            value = self.value_net(inputs).detach()
+            return value
     
     def compute_advantage(self, bs, ba, br, bhc, bla, bimg):
         with torch.no_grad():
@@ -156,22 +157,21 @@ class PPO():
     
     def update(self, bs, ba, br, bhc, bla, bimg):
         adv, _, old_log_probs = self.compute_advantage(bs, ba, br, bhc, bla, bimg)
-        for _ in range(constant.UPDATE_NUM):
-            log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
-            ratio = torch.exp(log_probs - old_log_probs)
-            adv_action = torch.zeros([ratio.shape[0], constant.ACT_NUM])
-            for i in range(len(adv)):
-                adv_action[i][int(ba[0][i])] = adv[0][i]
+        log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
+        ratio = torch.exp(log_probs - old_log_probs)
+        adv_action = torch.zeros([ratio.shape[0], constant.ACT_NUM])
+        for i in range(len(adv)):
+            adv_action[i][int(ba[0][i])] = adv[0][i]
 
-            ratio = ratio.cuda()
-            adv_action = adv_action.cuda()
-            surr1 = ratio * adv_action
-            surr2 = torch.clamp(ratio, 1 - 0.2, 1+ 0.2) * adv_action
-            actor_loss = torch.mean(-torch.min(surr1, surr2))
-            critic_loss = torch.mean(torch.nn.functional.mse_loss(self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)).cuda(), br.cuda()))
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            actor_loss.backward()
-            critic_loss.backward()
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
+        ratio = ratio.cuda()
+        adv_action = adv_action.cuda()
+        surr1 = ratio * adv_action
+        surr2 = torch.clamp(ratio, 1 - 0.2, 1+ 0.2) * adv_action
+        actor_loss = torch.mean(-torch.min(surr1, surr2))
+        critic_loss = torch.mean(torch.nn.functional.mse_loss(self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)).cuda(), br.cuda()))
+        self.actor_optimizer.zero_grad()
+        self.critic_optimizer.zero_grad()
+        actor_loss.backward(retain_graph=True)
+        critic_loss.backward()
+        self.actor_optimizer.step()
+        self.critic_optimizer.step()
