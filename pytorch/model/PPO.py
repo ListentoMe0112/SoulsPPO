@@ -130,19 +130,24 @@ class PPO():
         self.value_net = value_net
         self.actor_optimizer = torch.optim.Adam(policy_net.parameters(), lr=actor_learning_rate)
         self.critic_optimizer = torch.optim.Adam(value_net.parameters(), lr=value_learing_rate)
+        self.gamma = constant.GAMMA
+        self.lam = constant.LAMBDA
     
     def inference(self, hc, obs, img, la):
-        # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
-        inputs = torch.concatenate([hc, obs, img, la], axis= 1)
-        # [None, 26 + 26 + 20]
-        logits, hc = self.policy_net(inputs)
-        # [None, 1]
-        action_dist = torch.distributions.Categorical(logits)
-        action = action_dist.sample().item()
-        
-        v  =self.value_net(inputs)
-        
-        return action, hc, logits, v
+        with torch.no_grad():
+            # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
+            inputs = torch.concatenate([hc, obs, img, la], axis= 1)
+            # [None, 26 + 26 + 20]
+            logits, hc = self.policy_net(inputs)
+            # new_log = torch.log(torch.clamp(new_logits, 1e-5))
+            log_p = torch.log(torch.clamp(logits, 1e-5))
+            # [None, 1]
+            action_dist = torch.distributions.Categorical(logits)
+            action = action_dist.sample().item()
+            
+            v  = self.value_net(inputs)
+            
+            return action, hc, log_p, v
     
     def get_best_action(self, hc, obs, img, la):
         # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
@@ -164,30 +169,51 @@ class PPO():
             value = self.value_net(inputs).detach()
             return value
     
-    def compute_advantage(self, br, bov):
-        with torch.no_grad():
-            # bv = self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)).detach()
-            # old_log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim=1))
-            # old_log_probs = old_log_probs.detach()
-            return br - bov
+    # def compute_advantage(self, br, bov):
+    #     with torch.no_grad():
+    #         # bv = self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)).detach()
+    #         # old_log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim=1))
+    #         # old_log_probs = old_log_probs.detach()
+    #         return br - bov
     
-    def update(self, bs, ba, br, bhc, bla, bimg, bov, bodist):
-        adv = self.compute_advantage(br, bov)
-        log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
-        ratio = torch.exp(log_probs - bodist)
+    def update(self, bs, ba, bhc, bla, bimg, bov, old_log, badv, btv):
+        # adv = self.compute_advantage(br, bov)
+        new_logits, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
+        new_log = torch.log(torch.clamp(new_logits, 1e-5))
+        
+        ratio = torch.exp(new_log - old_log)
+        
         adv_action = torch.zeros([ratio.shape[0], constant.ACT_NUM])
-        for i in range(len(adv)):
-            adv_action[i][int(ba[i][0])] = adv[i][0]
+        for i in range(len(badv)):
+            adv_action[i][int(ba[i][0])] = badv[i][0]
 
         ratio = ratio.cuda()
         adv_action = adv_action.cuda()
         surr1 = ratio * adv_action
         surr2 = torch.clamp(ratio, 1 - 0.2, 1+ 0.2) * adv_action
         actor_loss = torch.mean(-torch.min(surr1, surr2))
-        critic_loss = torch.mean(torch.nn.functional.mse_loss(self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)).cuda(), br.cuda()))
+        critic_loss = torch.mean(torch.nn.functional.mse_loss(self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)), btv))
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
         actor_loss.backward(retain_graph=True)
         critic_loss.backward()
         self.actor_optimizer.step()
         self.critic_optimizer.step()
+
+    def compute_generalized_advantage_estimator(self, mb_rewards, mb_values, lastValue, Steps):
+        with torch.no_grad():
+            mb_rewards = torch.asarray(mb_rewards, dtype=torch.float32)
+            mb_values = torch.asarray(mb_values, dtype=torch.float32)
+            mb_advs = torch.zeros_like(mb_rewards)
+            lastgaelam = 0
+            nextnonterminal = 0
+            for t in reversed(range(Steps)):  # 倒序实现，便于进行递归
+                if t == Steps - 1:  # 如果是最后一步，要判断当前是否是终止状态，如果是，next_value就是0
+                    nextnonterminal = 0
+                    nextvalues = lastValue
+                else:
+                    nextnonterminal = 1.0 
+                    nextvalues = mb_values[t + 1]
+                delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
+                mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
+            return mb_advs, mb_advs + mb_values
