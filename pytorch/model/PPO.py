@@ -131,7 +131,7 @@ class PPO():
         self.actor_optimizer = torch.optim.Adam(policy_net.parameters(), lr=actor_learning_rate)
         self.critic_optimizer = torch.optim.Adam(value_net.parameters(), lr=value_learing_rate)
     
-    def get_action(self, hc, obs, img, la):
+    def inference(self, hc, obs, img, la):
         # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
         inputs = torch.concatenate([hc, obs, img, la], axis= 1)
         # [None, 26 + 26 + 20]
@@ -140,7 +140,9 @@ class PPO():
         action_dist = torch.distributions.Categorical(logits)
         action = action_dist.sample().item()
         
-        return action, hc
+        v  =self.value_net(inputs)
+        
+        return action, hc, logits, v
     
     def get_v(self, hc, obs, img, la):
         with torch.no_grad():
@@ -148,17 +150,17 @@ class PPO():
             value = self.value_net(inputs).detach()
             return value
     
-    def compute_advantage(self, bs, ba, br, bhc, bla, bimg):
+    def compute_advantage(self, br, bov):
         with torch.no_grad():
-            bv = self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)).detach()
-            old_log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim=1))
-            old_log_probs = old_log_probs.detach()
-            return br.cuda() - bv.cuda(), bv, old_log_probs
+            # bv = self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)).detach()
+            # old_log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim=1))
+            # old_log_probs = old_log_probs.detach()
+            return br - bov
     
-    def update(self, bs, ba, br, bhc, bla, bimg):
-        adv, _, old_log_probs = self.compute_advantage(bs, ba, br, bhc, bla, bimg)
+    def update(self, bs, ba, br, bhc, bla, bimg, bov, bodist):
+        adv = self.compute_advantage(br, bov)
         log_probs, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
-        ratio = torch.exp(log_probs - old_log_probs)
+        ratio = torch.exp(log_probs - bodist)
         adv_action = torch.zeros([ratio.shape[0], constant.ACT_NUM])
         for i in range(len(adv)):
             adv_action[i][int(ba[i][0])] = adv[i][0]

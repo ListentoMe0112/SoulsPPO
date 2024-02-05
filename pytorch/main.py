@@ -42,14 +42,13 @@ def train():
     for ep in range(EP_MAX): 
         ep_r = 0
         ori_obs, info = env.reset()
-
         # for lstm
         hc = torch.randn([1, constant.HID_CELL_DIM]).cuda()
 
 
         terminated = False
-        buffer_s, buffer_a, buffer_r, buffer_hc, buffer_la, buffer_img = [], [], [], [], [], []
-
+        buffer_s, buffer_a, buffer_r, buffer_hc, buffer_la, buffer_img, buffer_old_v, buffer_old_dist = [], [], [], [], [], [], [], []
+        
         while not terminated:
             # dict to vector
             legal_action = torch.from_numpy(np.zeros([1,constant.ACT_NUM])).type(torch.float32).cuda()
@@ -65,12 +64,9 @@ def train():
                 legal_action[0][v] = 1.0
             legal_action.type(torch.float32)
 
-            action, hc  = Model.get_action(hc, obs, img, legal_action)
+            action, hc, old_dist, old_v = Model.inference(hc, obs, img, legal_action)
 
             next_obs, reward, terminated, truncated, info = env.step(action)
-
-            if ori_obs['boss_hp'][0] > next_obs['boss_hp'][0]:
-                logging.info("Hit Boss")
 
             buffer_s.append(np.squeeze(obs, axis=0))
             buffer_hc.append(np.squeeze(hc, axis=0))
@@ -78,6 +74,8 @@ def train():
             buffer_r.append(reward)
             buffer_la.append(np.squeeze(legal_action, axis=0))
             buffer_img.append(np.squeeze(img, axis=0))
+            buffer_old_v.append(np.squeeze(old_v, axis=0))
+            buffer_old_dist.append(np.squeeze(old_dist, axis = 0))
 
             ori_obs = next_obs
             ep_r += reward
@@ -90,9 +88,20 @@ def train():
             discounted_r.append(v_s_)
         discounted_r.reverse()
         bs, ba, br, bhc, bla, bimg = torch.vstack(buffer_s), torch.FloatTensor(buffer_a).reshape([len(buffer_a), 1]), torch.FloatTensor(discounted_r).reshape([len(buffer_r), 1]), torch.vstack(buffer_hc), torch.vstack(buffer_la), torch.vstack(buffer_img)
-        buffer_s, buffer_a, buffer_r, buffer_hc, buffer_la, buffer_img = [], [], [], [], [], []
+        bov = torch.FloatTensor(buffer_old_v).reshape([len(buffer_old_v), 1])
+        bodist = torch.vstack(buffer_old_dist)
         
-        Model.update(bs, ba, br, bhc, bla, bimg)
+        # replay buffer to model
+        # only get latest replay
+        if len(buffer_s) > 4096:
+            idx = len(buffer_s) - 4096
+            buffer_s = buffer_s[idx:-1]
+            buffer_a = buffer_a[idx:-1]
+            buffer_hc = buffer_hc[idx:-1]
+            buffer_la = buffer_la[idx:-1]
+            buffer_img = buffer_img[idx:-1] 
+        
+        Model.update(bs, ba, br, bhc, bla, bimg, bov, bodist)
 
         logger.info("Ep: %s, |Ep_r: %s" , ep, ep_r)
         if ep == 0: 

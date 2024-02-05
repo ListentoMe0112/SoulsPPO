@@ -52,7 +52,7 @@ def test():
             legal_action = torch.zeros([1,constant.ACT_NUM]).cuda()
             legal_action[0][1] = 1
 
-            action, hc  = Model.get_action(hc, obs, img, legal_action)
+            action, hc, old_dist, old_v = Model.inference(hc, obs, img, legal_action)
 
             reward = 0
 
@@ -73,7 +73,16 @@ def test():
             discounted_r.append(v_s_)
         discounted_r.reverse()
         bs, ba, br, bhc, bla, bimg = torch.vstack(buffer_s), torch.FloatTensor(buffer_a).reshape([len(buffer_a), 1]), torch.FloatTensor(discounted_r).reshape([len(buffer_r), 1]), torch.vstack(buffer_hc), torch.vstack(buffer_la), torch.vstack(buffer_img)
-        buffer_s, buffer_a, buffer_r, buffer_hc, buffer_la, buffer_img = [], [], [], [], [], []
+        
+        # replay buffer to model
+        # only get latest replay
+        if len(buffer_s) > 4096:
+            idx = len(buffer_s) - 4096
+            buffer_s = buffer_s[idx:-1]
+            buffer_a = buffer_a[idx:-1]
+            buffer_hc = buffer_hc[idx:-1]
+            buffer_la = buffer_la[idx:-1]
+            buffer_img = buffer_img[idx:-1] 
         
         Model.update(bs, ba, br, bhc, bla, bimg)
 
