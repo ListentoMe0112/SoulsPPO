@@ -100,14 +100,21 @@ def train():
             buffer_hc = buffer_hc[idx:-1]
             buffer_la = buffer_la[idx:-1]
             buffer_img = buffer_img[idx:-1] 
+            bov = bov[idx:-1]
+            bodist = bodist[idx:-1]
         
         Model.update(bs, ba, br, bhc, bla, bimg, bov, bodist)
 
-        logger.info("Ep: %s, |Ep_r: %s" , ep, ep_r)
+        logger.info("Ep: %s, |Ep_r: %s| Value(state): %s" , ep, ep_r, torch.mean(bov))
         if ep == 0: 
             all_ep_r.append(ep_r)
         else: 
             all_ep_r.append(all_ep_r[-1]*0.9 + ep_r*0.1)
+            
+        if ep > 0 and ep % constant.SAVE_EPOCH == 0:
+            torch.save(actor.state_dict(), "checkpoint/actor.pth")
+            torch.save(critic.state_dict(), 'checkpoint/critic.pth')
+            
 
     plt.plot(np.arange(len(all_ep_r)), all_ep_r)
     plt.xlabel('Episode')

@@ -144,6 +144,20 @@ class PPO():
         
         return action, hc, logits, v
     
+    def get_best_action(self, hc, obs, img, la):
+        # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
+        inputs = torch.concatenate([hc, obs, img, la], axis= 1)
+        # [None, 26 + 26 + 20]
+        logits, hc = self.policy_net(inputs)
+        action = torch.argmax(logits)
+        # [None, 1]
+        # action_dist = torch.distributions.Categorical(logits)
+        # action = action_dist.maximum().item()
+        
+        # v  =self.value_net(inputs)
+        
+        return action, hc, logits
+    
     def get_v(self, hc, obs, img, la):
         with torch.no_grad():
             inputs = torch.concatenate([hc, obs, img, la], axis= 1)
