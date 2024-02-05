@@ -27,7 +27,7 @@ class PolicyNet(torch.nn.Module):
                                       batch_first=True)
         
         self.action_dist = torch.nn.Sequential(
-            torch.nn.Sequential(torch.nn.Linear(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 20)), torch.nn.Softmax()
+            torch.nn.Sequential(torch.nn.Linear(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 20)), torch.nn.Softmax(dim=1)
         )
 
     '''
@@ -161,7 +161,7 @@ class PPO():
         ratio = torch.exp(log_probs - old_log_probs)
         adv_action = torch.zeros([ratio.shape[0], constant.ACT_NUM])
         for i in range(len(adv)):
-            adv_action[i][int(ba[0][i])] = adv[0][i]
+            adv_action[i][int(ba[i][0])] = adv[i][0]
 
         ratio = ratio.cuda()
         adv_action = adv_action.cuda()

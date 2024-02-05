@@ -20,7 +20,7 @@ file_handler = logging.FileHandler('output.log')
 logger.addHandler(stream_handler)
 logger.addHandler(file_handler)
 
-EP_MAX = 3000
+EP_MAX = 6000
 BATCH = 32
 GAMMA = 0.9
 
@@ -29,10 +29,7 @@ soulsgym.set_log_level(level=logging.DEBUG)
 env = gymnasium.make("SoulsGymIudex-v0")
 
 def train():
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(1993)
-    else:
-        torch.manual_seed(123)
+    torch.cuda.manual_seed(1993)
 
     actor = PPO.PolicyNet().cuda()
     critic = PPO.ValueNet().cuda()
@@ -47,25 +44,28 @@ def train():
         ori_obs, info = env.reset()
 
         # for lstm
-        hc = np.zeros(shape=[1, constant.HID_CELL_DIM], dtype=float)
-        legal_action = np.zeros([1,constant.ACT_NUM])
+        hc = torch.randn([1, constant.HID_CELL_DIM]).cuda()
+
 
         terminated = False
         buffer_s, buffer_a, buffer_r, buffer_hc, buffer_la, buffer_img = [], [], [], [], [], []
 
         while not terminated:
             # dict to vector
+            legal_action = torch.from_numpy(np.zeros([1,constant.ACT_NUM])).type(torch.float32).cuda()
             obs = utils.state_to_vector(ori_obs)
             # 90 160, 3
             img = env.game.img
-            img = np.reshape(img, [1, 90, 160, 3])
-            obs = np.reshape(obs, [1,26])
-            hc = np.reshape(hc, [1,constant.HID_CELL_DIM])
-            legal_actions = env.current_valid_actions()
-            for v in legal_actions:
-                legal_action[0][v] = 1
+            img = torch.reshape(torch.from_numpy(img), [1, 90 * 160 *3]).type(torch.float32).cuda()
+            obs = torch.reshape(torch.from_numpy(obs), [1,26]).type(torch.float32).cuda()
+            hc = torch.reshape(hc, [1,constant.HID_CELL_DIM]).type(torch.float32).cuda()
+            legal_actions = torch.from_numpy(np.array(env.current_valid_actions())).cuda()
 
-            action, hc  = Model.get_action(hc, obs, img, legal_action, axis = 1)
+            for v in legal_actions:
+                legal_action[0][v] = 1.0
+            legal_action.type(torch.float32)
+
+            action, hc  = Model.get_action(hc, obs, img, legal_action)
 
             next_obs, reward, terminated, truncated, info = env.step(action)
 
@@ -83,16 +83,16 @@ def train():
             ep_r += reward
         
         # calculate discounted reward after episode finished
-        v_s_ = Model.critic(np.concatenate([hc, obs, img, legal_action], axis = 1)) # The value of last state, criticed by value network
+        v_s_ = Model.get_v(hc, obs, img, legal_action) # The value of last state, criticed by value network
         discounted_r = []
         for r in buffer_r[::-1]:
             v_s_ = r + GAMMA * v_s_
             discounted_r.append(v_s_)
         discounted_r.reverse()
-        bs, ba, br, bhc, bla, bimg = np.vstack(buffer_s), np.vstack(buffer_a), np.array(discounted_r)[:, np.newaxis], np.vstack(buffer_hc), np.vstack(buffer_la), np.vstack(buffer_img)
+        bs, ba, br, bhc, bla, bimg = torch.vstack(buffer_s), torch.FloatTensor(buffer_a).reshape([len(buffer_a), 1]), torch.FloatTensor(discounted_r).reshape([len(buffer_r), 1]), torch.vstack(buffer_hc), torch.vstack(buffer_la), torch.vstack(buffer_img)
         buffer_s, buffer_a, buffer_r, buffer_hc, buffer_la, buffer_img = [], [], [], [], [], []
         
-        Model.update(bs, ba, br, bhc, bla, bimg, ep)
+        Model.update(bs, ba, br, bhc, bla, bimg)
 
         logger.info("Ep: %s, |Ep_r: %s" , ep, ep_r)
         if ep == 0: 
@@ -106,7 +106,6 @@ def train():
     plt.show()
         
     env.close()
-
 
 if __name__ == "__main__":
         train()

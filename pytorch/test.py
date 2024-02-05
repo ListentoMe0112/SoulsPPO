@@ -72,7 +72,7 @@ def test():
             v_s_ = r + GAMMA * v_s_
             discounted_r.append(v_s_)
         discounted_r.reverse()
-        bs, ba, br, bhc, bla, bimg = torch.vstack(buffer_s), torch.FloatTensor(buffer_a).reshape([1, len(buffer_a)]), torch.FloatTensor(discounted_r).reshape([1, len(buffer_r)]), torch.vstack(buffer_hc), torch.vstack(buffer_la), torch.vstack(buffer_img)
+        bs, ba, br, bhc, bla, bimg = torch.vstack(buffer_s), torch.FloatTensor(buffer_a).reshape([len(buffer_a), 1]), torch.FloatTensor(discounted_r).reshape([len(buffer_r), 1]), torch.vstack(buffer_hc), torch.vstack(buffer_la), torch.vstack(buffer_img)
         buffer_s, buffer_a, buffer_r, buffer_hc, buffer_la, buffer_img = [], [], [], [], [], []
         
         Model.update(bs, ba, br, bhc, bla, bimg)

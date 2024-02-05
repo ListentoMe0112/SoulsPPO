@@ -64,7 +64,7 @@ def test():
             v_s_ = r + GAMMA * v_s_
             discounted_r.append(v_s_)
         discounted_r.reverse()
-        bs, ba, br, bhc = np.vstack(buffer_s), np.vstack(buffer_a), np.array(discounted_r)[:, np.newaxis], np.vstack(buffer_hc)
+        bs, ba, br, bhc = np.vstack(buffer_s), np.vstack(buffer_a), np.vstack(discounted_r).reshape([10,1]), np.vstack(buffer_hc)
         buffer_s, buffer_a, buffer_r, buffer_hc = [], [], [], []
         Model.update(bs, ba, br, bhc)
 
