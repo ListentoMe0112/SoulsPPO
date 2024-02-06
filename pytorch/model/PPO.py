@@ -2,8 +2,8 @@ import torch
 import numpy as np
 from constant import constant
 
-actor_learning_rate = 0.001
-value_learing_rate = 0.001
+actor_learning_rate = 0.002
+value_learing_rate = 0.01
 
 # output action [pi(s)]
 class PolicyNet(torch.nn.Module):
@@ -69,24 +69,27 @@ class PolicyNet(torch.nn.Module):
 
 # output value v(s)
 class ValueNet(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, pn : PolicyNet):
         super(ValueNet, self).__init__()
-        self.cnn_net = torch.nn.Sequential(
-            # [None, 3, 90, 160] -> [None, 32, 21, 39]
-            torch.nn.Sequential(torch.nn.Conv2d(3, 32, kernel_size=8, stride=4), torch.nn.ReLU()),
-            # [None, 32, 21, 39] -> [None, 64, 9, 18]
-            torch.nn.Sequential(torch.nn.Conv2d(32, 64, kernel_size=4, stride=2), torch.nn.ReLU()),
-            # [None, 64, 9, 18] -> [64, 7, 16]
-            torch.nn.Sequential(torch.nn.Conv2d(64, 64, kernel_size=3, stride=1), torch.nn.ReLU()),
-            torch.nn.Flatten(),
-            torch.nn.Sequential(torch.nn.Linear(16 * 7 * 64, 512), torch.nn.Tanh()),
-            torch.nn.Sequential(torch.nn.Linear(512, 26), torch.nn.ReLU())
-        )
+        self.cnn_net = pn.cnn_net
+        self.lstm_net = pn.lstm_net
+        
+        # self.cnn_net = torch.nn.Sequential(
+        #     # [None, 3, 90, 160] -> [None, 32, 21, 39]
+        #     torch.nn.Sequential(torch.nn.Conv2d(3, 32, kernel_size=8, stride=4), torch.nn.ReLU()),
+        #     # [None, 32, 21, 39] -> [None, 64, 9, 18]
+        #     torch.nn.Sequential(torch.nn.Conv2d(32, 64, kernel_size=4, stride=2), torch.nn.ReLU()),
+        #     # [None, 64, 9, 18] -> [64, 7, 16]
+        #     torch.nn.Sequential(torch.nn.Conv2d(64, 64, kernel_size=3, stride=1), torch.nn.ReLU()),
+        #     torch.nn.Flatten(),
+        #     torch.nn.Sequential(torch.nn.Linear(16 * 7 * 64, 512), torch.nn.Tanh()),
+        #     torch.nn.Sequential(torch.nn.Linear(512, 26), torch.nn.ReLU())
+        # )
 
-        # batch, seq, feature
-        self.lstm_net = torch.nn.LSTM(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 
-                                      constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM,
-                                      batch_first=True)
+        # # batch, seq, feature
+        # self.lstm_net = torch.nn.LSTM(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 
+        #                               constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM,
+        #                               batch_first=True)
         
         self.value = torch.nn.Sequential(
             torch.nn.Sequential(torch.nn.Linear(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 1))
@@ -191,14 +194,18 @@ class PPO():
         adv_action = adv_action.cuda()
         surr1 = ratio * adv_action
         surr2 = torch.clamp(ratio, 1 - 0.2, 1+ 0.2) * adv_action
+
+        new_value = self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
+
         actor_loss = torch.mean(-torch.min(surr1, surr2))
-        critic_loss = torch.mean(torch.nn.functional.mse_loss(self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1)), btv))
+        critic_loss = torch.mean(torch.nn.functional.mse_loss(new_value, btv))
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
         actor_loss.backward(retain_graph=True)
         critic_loss.backward()
         self.actor_optimizer.step()
         self.critic_optimizer.step()
+        return actor_loss, critic_loss
 
     def compute_generalized_advantage_estimator(self, mb_rewards, mb_values, lastValue, Steps):
         with torch.no_grad():
@@ -216,4 +223,5 @@ class PPO():
                     nextvalues = mb_values[t + 1]
                 delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
                 mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
+
             return mb_advs, mb_advs + mb_values

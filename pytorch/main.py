@@ -32,7 +32,7 @@ def train():
     torch.cuda.manual_seed(1993)
 
     actor = PPO.PolicyNet().cuda()
-    critic = PPO.ValueNet().cuda()
+    critic = PPO.ValueNet(actor).cuda()
     
     Model = PPO.PPO(actor, critic)
 
@@ -114,17 +114,17 @@ def train():
         
         # replay buffer to model
         # only get latest replay
-        if len(buffer_s) > 4096:
-            idx = len(buffer_s) - 4096
-            buffer_s = buffer_s[idx:-1]
-            buffer_a = buffer_a[idx:-1]
-            buffer_hc = buffer_hc[idx:-1]
-            buffer_la = buffer_la[idx:-1]
-            buffer_img = buffer_img[idx:-1] 
-            buffer_old_dist = buffer_old_dist[idx:-1]
-            buffer_old_v = buffer_old_v[idx:-1]
-            buffer_adv = buffer_adv[idx:-1]
-            buffer_target_value = buffer_target_value[idx:-1]
+        if len(buffer_s) > constant.BATCH_SIZE:
+            idx = len(buffer_s) - constant.BATCH_SIZE
+            buffer_s = buffer_s[idx:]
+            buffer_a = buffer_a[idx:]
+            buffer_hc = buffer_hc[idx:]
+            buffer_la = buffer_la[idx:]
+            buffer_img = buffer_img[idx:] 
+            buffer_old_dist = buffer_old_dist[idx:]
+            buffer_old_v = buffer_old_v[idx:]
+            buffer_adv = buffer_adv[idx:]
+            buffer_target_value = buffer_target_value[idx:]
             
         u_bs = torch.vstack(buffer_s).cuda()
         u_ba = torch.FloatTensor(buffer_a).reshape([len(buffer_a), 1]).cuda()
@@ -139,9 +139,9 @@ def train():
         # print("ubs: %s, u_ba: %s, ubhc: %s, u_bla: %s, u_bimg: %s, ubov: %s, ubodist: %s, ubadv: %s, ubtv: %s", 
                 # u_bs.shape, u_ba.shape, u_bhc.shape, u_bla.shape, u_bimg.shape, u_bov.shape, u_bodist.shape, u_badv.shape, u_btv.shape)
         
-        Model.update(u_bs, u_ba, u_bhc, u_bla, u_bimg, u_bov, u_bodist, u_badv, u_btv)
+        actor_loss, critic_loss = Model.update(u_bs, u_ba, u_bhc, u_bla, u_bimg, u_bov, u_bodist, u_badv, u_btv)
         
-        logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, len_buffer: %s, shape: %s" , ep, ep_r, torch.mean(u_bov), len(buffer_s), u_bs.shape)
+        logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, actor_loss: %s, critic_loss: %s" , ep, ep_r, torch.mean(u_bov), actor_loss, critic_loss)
         if ep == 0: 
             all_ep_r.append(ep_r)
         else: 
