@@ -31,9 +31,18 @@ env = gymnasium.make("SoulsGymIudex-v0")
 def train():
     torch.cuda.manual_seed(1993)
 
-    actor = PPO.PolicyNet().cuda()
-    critic = PPO.ValueNet(actor).cuda()
+    # actor = PPO.PolicyNet().cuda()
+    # critic = PPO.ValueNet(actor).cuda()
     
+    # Model = PPO.PPO(actor, critic)
+
+    actor = PPO.PolicyNet().cuda()
+    actor.load_state_dict(torch.load("checkpoint/actor.pth"))
+    # actor.eval()
+    critic = PPO.ValueNet(actor).cuda()
+    critic.load_state_dict(torch.load("checkpoint/critic.pth"))
+    # critic.eval()
+
     Model = PPO.PPO(actor, critic)
 
     buffer_s, buffer_a, buffer_hc, buffer_la, buffer_img, buffer_old_v, buffer_old_dist, buffer_adv, buffer_target_value= [], [], [], [], [], [], [], [], []

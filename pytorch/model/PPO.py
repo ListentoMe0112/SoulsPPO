@@ -212,6 +212,7 @@ class PPO():
             mb_rewards = torch.asarray(mb_rewards, dtype=torch.float32)
             mb_values = torch.asarray(mb_values, dtype=torch.float32)
             mb_advs = torch.zeros_like(mb_rewards)
+            mb_target_values = torch.zeros_like(mb_rewards)
             lastgaelam = 0
             nextnonterminal = 0
             for t in reversed(range(Steps)):  # 倒序实现，便于进行递归
@@ -221,7 +222,8 @@ class PPO():
                 else:
                     nextnonterminal = 1.0 
                     nextvalues = mb_values[t + 1]
-                delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
+                mb_target_values[t] = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal
+                delta = mb_target_values[t] - mb_values[t]
                 mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
-            return mb_advs, mb_advs + mb_values
+            return mb_advs,  mb_target_values
