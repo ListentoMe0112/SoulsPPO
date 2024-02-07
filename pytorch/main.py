@@ -71,8 +71,13 @@ def train():
             hc = torch.reshape(hc, [1,constant.HID_CELL_DIM]).type(torch.float32).cuda()
             legal_actions = torch.from_numpy(np.array(env.current_valid_actions())).cuda()
 
-            for v in legal_actions:
+            other_flag = True
+            for i, v in enumerate(legal_actions):
+                if i != len(legal_actions) - 1:
+                    other_flag = True
                 legal_action[0][v] = 1.0
+            if other_flag:
+                legal_action[0][len(legal_actions) - 1] = 0.0
             legal_action.type(torch.float32)
 
             action, hc, old_dist, old_v = Model.inference(hc, obs, img, legal_action)

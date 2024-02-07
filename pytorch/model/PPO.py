@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from constant import constant
 
-actor_learning_rate = 0.002
+actor_learning_rate = 0.02
 value_learing_rate = 0.01
 
 # output action [pi(s)]
@@ -64,7 +64,7 @@ class PolicyNet(torch.nn.Module):
         action_dist = self.action_dist(latent)
         
         legal_action_dist = action_dist * legal_action
-        
+
         return legal_action_dist, hc
 
 # output value v(s)
