@@ -31,17 +31,17 @@ env = gymnasium.make("SoulsGymIudex-v0")
 def train():
     torch.cuda.manual_seed(1993)
 
-    # actor = PPO.PolicyNet().cuda()
-    # critic = PPO.ValueNet(actor).cuda()
-    
-    # Model = PPO.PPO(actor, critic)
-
     actor = PPO.PolicyNet().cuda()
-    actor.load_state_dict(torch.load("checkpoint/actor.pth"))
-    # actor.eval()
     critic = PPO.ValueNet(actor).cuda()
-    critic.load_state_dict(torch.load("checkpoint/critic.pth"))
-    # critic.eval()
+    
+    Model = PPO.PPO(actor, critic)
+
+    # actor = PPO.PolicyNet().cuda()
+    # actor.load_state_dict(torch.load("checkpoint/actor.pth"))
+    # # actor.eval()
+    # critic = PPO.ValueNet(actor).cuda()
+    # critic.load_state_dict(torch.load("checkpoint/critic.pth"))
+    # # critic.eval()
 
     Model = PPO.PPO(actor, critic)
 
@@ -55,6 +55,7 @@ def train():
         ori_obs, info = env.reset()
         # for lstm
         hc = torch.randn([1, constant.HID_CELL_DIM]).cuda()
+        lastAction = 19
 
 
         terminated = False
@@ -81,7 +82,6 @@ def train():
             legal_action.type(torch.float32)
 
             action, hc, old_dist, old_v = Model.inference(hc, obs, img, legal_action)
-
             next_obs, reward, terminated, truncated, info = env.step(action)
 
             ep_buffer_s.append(np.squeeze(obs, axis=0))
@@ -152,10 +152,10 @@ def train():
         
         # print("ubs: %s, u_ba: %s, ubhc: %s, u_bla: %s, u_bimg: %s, ubov: %s, ubodist: %s, ubadv: %s, ubtv: %s", 
                 # u_bs.shape, u_ba.shape, u_bhc.shape, u_bla.shape, u_bimg.shape, u_bov.shape, u_bodist.shape, u_badv.shape, u_btv.shape)
-        
-        actor_loss, critic_loss = Model.update(u_bs, u_ba, u_bhc, u_bla, u_bimg, u_bov, u_bodist, u_badv, u_btv)
-        
-        logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, actor_loss: %s, critic_loss: %s" , ep, ep_r, torch.mean(u_bov), actor_loss, critic_loss)
+
+        for i in range(constant.UPDATE_NUM):
+            actor_loss, critic_loss = Model.update(u_bs, u_ba, u_bhc, u_bla, u_bimg, u_bov, u_bodist, u_badv, u_btv)
+            logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, actor_loss: %s, critic_loss: %s" , ep, ep_r, torch.mean(u_bov), actor_loss, critic_loss)
         if ep == 0: 
             all_ep_r.append(ep_r)
         else: 
