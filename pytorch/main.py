@@ -31,17 +31,17 @@ env = gymnasium.make("SoulsGymIudex-v0")
 def train():
     torch.cuda.manual_seed(1993)
 
-    actor = PPO.PolicyNet().cuda()
-    critic = PPO.ValueNet(actor).cuda()
-    
-    Model = PPO.PPO(actor, critic)
-
     # actor = PPO.PolicyNet().cuda()
-    # actor.load_state_dict(torch.load("checkpoint/actor.pth"))
-    # # actor.eval()
     # critic = PPO.ValueNet(actor).cuda()
-    # critic.load_state_dict(torch.load("checkpoint/critic.pth"))
-    # # critic.eval()
+    
+    # Model = PPO.PPO(actor, critic)
+
+    actor = PPO.PolicyNet().cuda()
+    actor.load_state_dict(torch.load("checkpoint/actor.pth"))
+    # actor.eval()
+    critic = PPO.ValueNet(actor).cuda()
+    critic.load_state_dict(torch.load("checkpoint/critic.pth"))
+    # critic.eval()
 
     Model = PPO.PPO(actor, critic)
 
@@ -55,7 +55,6 @@ def train():
         ori_obs, info = env.reset()
         # for lstm
         hc = torch.randn([1, constant.HID_CELL_DIM]).cuda()
-        lastAction = 19
 
 
         terminated = False
@@ -71,14 +70,17 @@ def train():
             obs = torch.reshape(torch.from_numpy(obs), [1,26]).type(torch.float32).cuda()
             hc = torch.reshape(hc, [1,constant.HID_CELL_DIM]).type(torch.float32).cuda()
             legal_actions = torch.from_numpy(np.array(env.current_valid_actions())).cuda()
-
-            other_flag = True
+            
+            other_flag = False
             for i, v in enumerate(legal_actions):
-                if i != len(legal_actions) - 1:
+                if v != 19:
                     other_flag = True
                 legal_action[0][v] = 1.0
             if other_flag:
-                legal_action[0][len(legal_actions) - 1] = 0.0
+                legal_action[0][19] = 0.0
+                
+            legal_action[0][18] = 0
+            legal_action[0][16] = 0
             legal_action.type(torch.float32)
 
             action, hc, old_dist, old_v = Model.inference(hc, obs, img, legal_action)
@@ -95,7 +97,7 @@ def train():
 
             ori_obs = next_obs
             ep_r += reward
-        
+    
         # calculate discounted reward after episode finished
         # print("ebs: %s, eba: %s, ebhc: %s, ebla: %s, ebimg: %s, ebov: %s, ebodist: %s", 
         #         len(ep_buffer_s), len(ep_buffer_a), len(ep_buffer_hc), len(ep_buffer_la), len(ep_buffer_img), len(ep_buffer_old_v), len(ep_buffer_old_dist))
@@ -155,11 +157,8 @@ def train():
 
         for i in range(constant.UPDATE_NUM):
             actor_loss, critic_loss = Model.update(u_bs, u_ba, u_bhc, u_bla, u_bimg, u_bov, u_bodist, u_badv, u_btv)
-            logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, actor_loss: %s, critic_loss: %s" , ep, ep_r, torch.mean(u_bov), actor_loss, critic_loss)
-        if ep == 0: 
-            all_ep_r.append(ep_r)
-        else: 
-            all_ep_r.append(all_ep_r[-1]*0.9 + ep_r*0.1)
+            if i == constant.UPDATE_NUM - 1:
+                logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, actor_loss: %s, critic_loss: %s" , ep, ep_r, torch.mean(u_bov), actor_loss, critic_loss)
             
         if ep > 0 and ep % constant.SAVE_EPOCH == 0:
             torch.save(actor.state_dict(), "checkpoint/actor.pth")
@@ -174,4 +173,4 @@ def train():
     env.close()
 
 if __name__ == "__main__":
-        train()
+    train()

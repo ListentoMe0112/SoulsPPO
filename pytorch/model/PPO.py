@@ -2,8 +2,8 @@ import torch
 import numpy as np
 from constant import constant
 
-actor_learning_rate = 0.04
-value_learing_rate = 0.001
+actor_learning_rate = 0.01
+value_learing_rate = 0.005
 
 # output action [pi(s)]
 class PolicyNet(torch.nn.Module):
@@ -197,8 +197,9 @@ class PPO():
 
         new_value = self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
 
-        actor_loss = torch.mean(-torch.min(surr1, surr2))
-        critic_loss = torch.mean(torch.nn.functional.mse_loss(new_value, btv))
+        actor_loss = torch.mean(-torch.min(surr1, surr2)) - torch.mean(torch.distributions.Categorical(new_logits).entropy()) * 0.05
+        critic_loss = torch.mean(torch.nn.functional.mse_loss(new_value, btv)) * 0.5
+        
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
         actor_loss.backward()
