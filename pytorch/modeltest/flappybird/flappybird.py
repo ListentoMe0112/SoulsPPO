@@ -268,7 +268,7 @@ class PPO():
                 delta = mb_target_values[t] - mb_values[t]
                 mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
-            return mb_advs,  mb_advs + mb_values
+            return mb_advs, mb_target_values
 
 
 def train():
