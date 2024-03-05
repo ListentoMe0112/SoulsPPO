@@ -2,23 +2,36 @@ import torch
 import numpy as np
 from constant import constant
 
-actor_learning_rate = 0.01
-value_learing_rate = 0.005
+actor_learning_rate = 0.002
+value_learing_rate  = 0.002
 
 # output action [pi(s)]
 class PolicyNet(torch.nn.Module):
     def __init__(self) -> None:
         super(PolicyNet, self).__init__()
         self.cnn_net = torch.nn.Sequential(
-            # [None, 3, 90, 160] -> [None, 32, 21, 39]
-            torch.nn.Sequential(torch.nn.Conv2d(3, 32, kernel_size=8, stride=4), torch.nn.ReLU()),
-            # [None, 32, 21, 39] -> [None, 64, 9, 18]
-            torch.nn.Sequential(torch.nn.Conv2d(32, 64, kernel_size=4, stride=2), torch.nn.ReLU()),
-            # [None, 64, 9, 18] -> [64, 7, 16]
-            torch.nn.Sequential(torch.nn.Conv2d(64, 64, kernel_size=3, stride=1), torch.nn.ReLU()),
+            # [None, 3, 90, 160] -> [None, 32, 42, 77]
+            torch.nn.Sequential(
+                torch.nn.Conv2d(3, 32, kernel_size=8, stride=2), 
+                # [None, 32, 42, 77] -> [None, 32, 21, 38]
+                torch.nn.MaxPool2d(2,2),
+                torch.nn.ReLU()),
+            # [None, 32, 21, 38] -> [None, 64, 9, 18]
+            torch.nn.Sequential(
+                torch.nn.Conv2d(32, 64, kernel_size=4, stride=2),
+                # [None, 64, 9, 18] -> [None, 64, 4, 9]
+                torch.nn.MaxPool2d(2,2), 
+                torch.nn.ReLU()),
+            # [None, 64, 4, 9] -> [64, 2, 7]
+            torch.nn.Sequential(
+                torch.nn.Conv2d(64, 64, kernel_size=3, stride=1), 
+                torch.nn.ReLU()),
             torch.nn.Flatten(),
-            torch.nn.Sequential(torch.nn.Linear(16 * 7 * 64, 512), torch.nn.Tanh()),
-            torch.nn.Sequential(torch.nn.Linear(512, 26), torch.nn.ReLU())
+            torch.nn.Sequential(
+                torch.nn.Linear(2 * 7 * 64, 64), 
+                torch.nn.Tanh()),
+                torch.nn.Linear(64, constant.OBS_DIM),
+                torch.nn.Tanh()
         )
 
         # batch, seq, feature
@@ -27,7 +40,7 @@ class PolicyNet(torch.nn.Module):
                                       batch_first=True)
         
         self.action_dist = torch.nn.Sequential(
-            torch.nn.Sequential(torch.nn.Linear(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 20)), torch.nn.Softmax(dim=1)
+            torch.nn.Sequential(torch.nn.Linear(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 20)), 
         )
 
     '''
@@ -61,9 +74,14 @@ class PolicyNet(torch.nn.Module):
         latent = torch.squeeze(latent, dim = 1)
         hc = torch.concat([h, c], dim = 1)
         
-        action_dist = self.action_dist(latent)
+        logists = self.action_dist(latent)
+        values, indexes = torch.min(logists, dim=1, keepdim=True)
+        logists = logists - values
+        # Try Avoid sampling illegal action
+        logists = logists + (legal_action - 1) * (32)
+        action_dist = torch.softmax(logists, dim = 1)
         
-        legal_action_dist = action_dist * legal_action
+        legal_action_dist = action_dist
 
         return legal_action_dist, hc
 
@@ -74,25 +92,10 @@ class ValueNet(torch.nn.Module):
         self.cnn_net = pn.cnn_net
         self.lstm_net = pn.lstm_net
         
-        # self.cnn_net = torch.nn.Sequential(
-        #     # [None, 3, 90, 160] -> [None, 32, 21, 39]
-        #     torch.nn.Sequential(torch.nn.Conv2d(3, 32, kernel_size=8, stride=4), torch.nn.ReLU()),
-        #     # [None, 32, 21, 39] -> [None, 64, 9, 18]
-        #     torch.nn.Sequential(torch.nn.Conv2d(32, 64, kernel_size=4, stride=2), torch.nn.ReLU()),
-        #     # [None, 64, 9, 18] -> [64, 7, 16]
-        #     torch.nn.Sequential(torch.nn.Conv2d(64, 64, kernel_size=3, stride=1), torch.nn.ReLU()),
-        #     torch.nn.Flatten(),
-        #     torch.nn.Sequential(torch.nn.Linear(16 * 7 * 64, 512), torch.nn.Tanh()),
-        #     torch.nn.Sequential(torch.nn.Linear(512, 26), torch.nn.ReLU())
-        # )
-
-        # # batch, seq, feature
-        # self.lstm_net = torch.nn.LSTM(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 
-        #                               constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM,
-        #                               batch_first=True)
-        
         self.value = torch.nn.Sequential(
-            torch.nn.Sequential(torch.nn.Linear(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 1))
+            torch.nn.Sequential(torch.nn.Linear(constant.OBS_DIM + constant.OBS_DIM + constant.ACT_NUM, 16)),
+            torch.nn.ReLU(),
+            torch.nn.Linear(16, 1)
         )
 
     def forward(self, input):
@@ -141,30 +144,31 @@ class PPO():
             # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
             inputs = torch.concatenate([hc, obs, img, la], axis= 1)
             # [None, 26 + 26 + 20]
-            logits, hc = self.policy_net(inputs)
+            p, hc = self.policy_net(inputs)
+            log_p = torch.log(p)
             # new_log = torch.log(torch.clamp(new_logits, 1e-5))
-            log_p = torch.log(torch.clamp(logits, 1e-5))
+            # log_p = torch.log(torch.clamp(logits, 1e-20))
             # [None, 1]
-            action_dist = torch.distributions.Categorical(logits)
+            action_dist = torch.distributions.Categorical(p)
             action = action_dist.sample().item()
             
             v  = self.value_net(inputs)
             
             return action, hc, log_p, v
     
-    def get_best_action(self, hc, obs, img, la):
-        # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
-        inputs = torch.concatenate([hc, obs, img, la], axis= 1)
-        # [None, 26 + 26 + 20]
-        logits, hc = self.policy_net(inputs)
-        action = torch.argmax(logits)
-        # [None, 1]
-        # action_dist = torch.distributions.Categorical(logits)
-        # action = action_dist.maximum().item()
+    # def get_best_action(self, hc, obs, img, la):
+    #     # [None, HID_CELL_DIM + OBS_DIM + IMG_DIM + ACT_NUM]
+    #     inputs = torch.concatenate([hc, obs, img, la], axis= 1)
+    #     # [None, 26 + 26 + 20]
+    #     logits, hc = self.policy_net(inputs)
+    #     action = torch.argmax(logits)
+    #     # [None, 1]
+    #     # action_dist = torch.distributions.Categorical(logits)
+    #     # action = action_dist.maximum().item()
         
-        # v  =self.value_net(inputs)
+    #     # v  =self.value_net(inputs)
         
-        return action, hc, logits
+        # return action, hc, logits
     
     def get_v(self, hc, obs, img, la):
         with torch.no_grad():
@@ -181,8 +185,8 @@ class PPO():
     
     def update(self, bs, ba, bhc, bla, bimg, bov, old_log, badv, btv):
         # adv = self.compute_advantage(br, bov)
-        new_logits, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
-        new_log = torch.log(torch.clamp(new_logits, 1e-5))
+        p, _ = self.policy_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
+        new_log = torch.log(p)
         
         ratio = torch.exp(new_log - old_log)
         
@@ -197,7 +201,7 @@ class PPO():
 
         new_value = self.value_net(torch.cat([bhc, bs, bimg, bla], dim = 1))
 
-        actor_loss = torch.mean(-torch.min(surr1, surr2)) - torch.mean(torch.distributions.Categorical(new_logits).entropy()) * 0.05
+        actor_loss = torch.mean(-torch.min(surr1, surr2)) - torch.mean(torch.distributions.Categorical(p).entropy()) * 0.05
         critic_loss = torch.mean(torch.nn.functional.mse_loss(new_value, btv)) * 0.5
         
         self.actor_optimizer.zero_grad()

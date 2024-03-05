@@ -323,6 +323,7 @@ def train():
                 reward -= 0.2
             terminated = p.game_over()
 
+            
             ep_buffer_s.append(np.squeeze(obs, axis=0))
             ep_buffer_hc.append(np.squeeze(hc, axis=0))
             ep_buffer_a.append(action)
@@ -331,6 +332,17 @@ def train():
             ep_buffer_old_v.append(np.squeeze(old_v, axis=0))
             ep_buffer_old_dist.append(np.squeeze(old_dist, axis = 0))
             ep_r += reward
+            
+            if len(ep_buffer_s) > BATCH_SIZE:
+                idx = len(ep_buffer_s) - BATCH_SIZE
+                ep_buffer_s = ep_buffer_s[idx:]
+                ep_buffer_hc = ep_buffer_hc[idx:]
+                ep_buffer_a = ep_buffer_a[idx:]
+                ep_buffer_r = ep_buffer_r[idx:]
+                ep_buffer_img = ep_buffer_img[idx:]
+                ep_buffer_old_v = ep_buffer_old_v[idx:]
+                ep_buffer_old_dist = ep_buffer_old_dist[idx:]
+                
     
         # calculate discounted reward after episode finished
         # print("ebs: %s, eba: %s, ebhc: %s, ebla: %s, ebimg: %s, ebov: %s, ebodist: %s", 

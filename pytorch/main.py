@@ -20,16 +20,17 @@ file_handler = logging.FileHandler('output.log')
 logger.addHandler(stream_handler)
 logger.addHandler(file_handler)
 
-EP_MAX = 8192
+EP_MAX = 16384 * 4
 BATCH = 32
 
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
-soulsgym.set_log_level(level=logging.DEBUG)
+soulsgym.set_log_level(level=logging.INFO)
 env = gymnasium.make("SoulsGymIudex-v0")
 
 def train():
     torch.cuda.manual_seed(1993)
+    MAX_HP = 1037
 
     # actor = PPO.PolicyNet().cuda()
     # critic = PPO.ValueNet(actor).cuda()
@@ -49,12 +50,13 @@ def train():
     
     terminated = False
     all_ep_r = []
-    # in one episode
+    # in one episodem
     for ep in range(EP_MAX): 
+        CUR_HP = 1037
         ep_r = 0
         ori_obs, info = env.reset()
         # for lstm
-        hc = torch.randn([1, constant.HID_CELL_DIM]).cuda()
+        hc = torch.zeros([1, constant.HID_CELL_DIM]).cuda()
 
 
         terminated = False
@@ -67,24 +69,26 @@ def train():
             # 90 160, 3
             img = env.game.img
             img = torch.reshape(torch.from_numpy(img), [1, 90 * 160 *3]).type(torch.float32).cuda()
-            obs = torch.reshape(torch.from_numpy(obs), [1,26]).type(torch.float32).cuda()
+            obs = torch.reshape(torch.from_numpy(obs), [1,constant.OBS_DIM]).type(torch.float32).cuda()
             hc = torch.reshape(hc, [1,constant.HID_CELL_DIM]).type(torch.float32).cuda()
             legal_actions = torch.from_numpy(np.array(env.current_valid_actions())).cuda()
             
-            other_flag = False
             for i, v in enumerate(legal_actions):
-                if v != 19:
-                    other_flag = True
                 legal_action[0][v] = 1.0
-            if other_flag:
-                legal_action[0][19] = 0.0
                 
-            legal_action[0][18] = 0
-            legal_action[0][16] = 0
+                
             legal_action.type(torch.float32)
 
             action, hc, old_dist, old_v = Model.inference(hc, obs, img, legal_action)
             next_obs, reward, terminated, truncated, info = env.step(action)
+            if action not in constant.NO_STAMIA_LOSS_ACTIONS:
+                reward -= 0.001
+                
+            if next_obs["boss_hp"][0] < MAX_HP:
+                MAX_HP = next_obs["boss_hp"][0]
+            
+            CUR_HP = next_obs["boss_hp"][0]
+                # logger.info("Episode: %s Achive New Max Hp: %s", ep, MAX_HP)
 
             ep_buffer_s.append(np.squeeze(obs, axis=0))
             ep_buffer_hc.append(np.squeeze(hc, axis=0))
@@ -109,9 +113,10 @@ def train():
         bimg = torch.vstack(ep_buffer_img).cuda()
         bla = torch.vstack(ep_buffer_la).cuda()
         ba = torch.FloatTensor(ep_buffer_a).reshape([len(ep_buffer_a), 1]).cuda()
+        br = torch.FloatTensor(ep_buffer_r).reshape([len(ep_buffer_r), 1]).cuda()
         
         v_s_ = Model.get_v(bhc, bs, bimg, bla).cuda() # The value of last state, criticed by value network
-        adv, target_value = Model.compute_generalized_advantage_estimator(ba, v_s_, lastValue, len(v_s_))
+        adv, target_value = Model.compute_generalized_advantage_estimator(br, v_s_, lastValue, len(v_s_))
 
         bov = torch.FloatTensor(ep_buffer_old_v).reshape([len(ep_buffer_old_v), 1])
         bodist = torch.vstack(ep_buffer_old_dist)
@@ -158,7 +163,8 @@ def train():
         for i in range(constant.UPDATE_NUM):
             actor_loss, critic_loss = Model.update(u_bs, u_ba, u_bhc, u_bla, u_bimg, u_bov, u_bodist, u_badv, u_btv)
             if i == constant.UPDATE_NUM - 1:
-                logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, actor_loss: %s, critic_loss: %s" , ep, ep_r, torch.mean(u_bov), actor_loss, critic_loss)
+                logger.info("Ep: %s, |Ep_r: %s| Value(state): %s, actor_loss: %s, critic_loss: %s, CUR HP: %s, Lowest HP: %s" , 
+                            ep, ep_r, torch.mean(u_bov).item(), actor_loss.item(), critic_loss.item(), CUR_HP, MAX_HP)
             
         if ep > 0 and ep % constant.SAVE_EPOCH == 0:
             torch.save(actor.state_dict(), "checkpoint/actor.pth")

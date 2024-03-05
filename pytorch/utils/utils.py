@@ -55,4 +55,6 @@ def state_to_vector(s:dict):
     obs[23] = float(s['player_pose'][2])
     obs[24] = float(s['player_pose'][3])
     obs[25] = float(s['player_sp'])
+    obs[26] = 139.0
+    obs[27] = 596.0
     return obs
